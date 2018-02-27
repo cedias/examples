@@ -2,22 +2,20 @@ import argparse
 import gym
 import numpy as np
 from itertools import count
-from collections import namedtuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torch.autograd as autograd
 from torch.autograd import Variable
-import torchvision.transforms as T
+from torch.distributions import Categorical
 
 
 parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
-                    help='random seed (default: 1)')
+                    help='random seed (default: 543)')
 parser.add_argument('--render', action='store_true',
                     help='render the environment')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
@@ -36,63 +34,70 @@ class Policy(nn.Module):
         self.affine1 = nn.Linear(4, 128)
         self.affine2 = nn.Linear(128, 2)
 
-        self.saved_actions = []
+        self.saved_log_probs = []
         self.rewards = []
 
     def forward(self, x):
         x = F.relu(self.affine1(x))
         action_scores = self.affine2(x)
-        return F.softmax(action_scores)
+        return F.softmax(action_scores, dim=1)
 
 
-model = Policy()
-optimizer = optim.Adam(model.parameters(), lr=1e-2)
+policy = Policy()
+optimizer = optim.Adam(policy.parameters(), lr=1e-2)
 
 
 def select_action(state):
     state = torch.from_numpy(state).float().unsqueeze(0)
-    probs = model(Variable(state))
-    action = probs.multinomial()
-    model.saved_actions.append(action)
-    return action.data
+    probs = policy(Variable(state))
+    m = Categorical(probs)
+    action = m.sample()
+    policy.saved_log_probs.append(m.log_prob(action))
+    return action.data[0]
 
 
 def finish_episode():
     R = 0
-    saved_actions = model.saved_actions
+    policy_loss = []
     rewards = []
-    for r in model.rewards[::-1]:
+    for r in policy.rewards[::-1]:
         R = r + args.gamma * R
         rewards.insert(0, R)
     rewards = torch.Tensor(rewards)
-    rewards = (rewards - rewards.mean()) / rewards.std()
-    for action, r in zip(model.saved_actions, rewards):
-        action.reinforce(r)
+    rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)
+    for log_prob, reward in zip(policy.saved_log_probs, rewards):
+        policy_loss.append(-log_prob * reward)
     optimizer.zero_grad()
-    autograd.backward(model.saved_actions, [None for _ in model.saved_actions])
+    policy_loss = torch.cat(policy_loss).sum()
+    policy_loss.backward()
     optimizer.step()
-    del model.rewards[:]
-    del model.saved_actions[:]
+    del policy.rewards[:]
+    del policy.saved_log_probs[:]
 
 
-running_reward = 10
-for i_episode in count(1):
-    state = env.reset()
-    for t in range(10000): # Don't infinite loop while learning
-        action = select_action(state)
-        state, reward, done, _ = env.step(action[0,0])
-        if args.render:
-            env.render()
-        model.rewards.append(reward)
-        if done:
+def main():
+    running_reward = 10
+    for i_episode in count(1):
+        state = env.reset()
+        for t in range(10000):  # Don't infinite loop while learning
+            action = select_action(state)
+            state, reward, done, _ = env.step(action)
+            if args.render:
+                env.render()
+            policy.rewards.append(reward)
+            if done:
+                break
+
+        running_reward = running_reward * 0.99 + t * 0.01
+        finish_episode()
+        if i_episode % args.log_interval == 0:
+            print('Episode {}\tLast length: {:5d}\tAverage length: {:.2f}'.format(
+                i_episode, t, running_reward))
+        if running_reward > env.spec.reward_threshold:
+            print("Solved! Running reward is now {} and "
+                  "the last episode runs to {} time steps!".format(running_reward, t))
             break
 
-    running_reward = running_reward * 0.99 + t * 0.01
-    finish_episode()
-    if i_episode % args.log_interval == 0:
-        print('Episode {}\tLast length: {:5d}\tAverage length: {:.2f}'.format(
-            i_episode, t, running_reward))
-    if running_reward > 200:
-        print("Solved! Running reward is now {} and "
-              "the last episode runs to {} time steps!".format(running_reward, t))
-        break
+
+if __name__ == '__main__':
+    main()

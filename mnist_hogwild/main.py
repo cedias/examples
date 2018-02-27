@@ -1,5 +1,5 @@
 from __future__ import print_function
-import os, argparse
+import argparse
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +14,7 @@ parser.add_argument('--batch-size', type=int, default=64, metavar='N',
 parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                     help='input batch size for testing (default: 1000)')
 parser.add_argument('--epochs', type=int, default=10, metavar='N',
-                    help='number of epochs to train (default: 2)')
+                    help='number of epochs to train (default: 10)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
@@ -41,8 +41,8 @@ class Net(nn.Module):
         x = x.view(-1, 320)
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training)
-        x = F.relu(self.fc2(x))
-        return F.log_softmax(x)
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -50,7 +50,7 @@ if __name__ == '__main__':
     torch.manual_seed(args.seed)
 
     model = Net()
-    model.share_memory()
+    model.share_memory() # gradients are allocated lazily, so they are not shared here
 
     processes = []
     for rank in range(args.num_processes):

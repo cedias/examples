@@ -6,19 +6,16 @@
 ###############################################################################
 
 import argparse
-import time
-import math
 
 import torch
-import torch.nn as nn
 from torch.autograd import Variable
 
 import data
 
-parser = argparse.ArgumentParser(description='PyTorch PTB Language Model')
+parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 Language Model')
 
 # Model parameters.
-parser.add_argument('--data', type=str, default='./data/penn',
+parser.add_argument('--data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
 parser.add_argument('--checkpoint', type=str, default='./model.pt',
                     help='model checkpoint to use')
@@ -49,6 +46,7 @@ if args.temperature < 1e-3:
 
 with open(args.checkpoint, 'rb') as f:
     model = torch.load(f)
+model.eval()
 
 if args.cuda:
     model.cuda()

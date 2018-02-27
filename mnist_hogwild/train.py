@@ -7,9 +7,6 @@ from torchvision import datasets, transforms
 
 def train(rank, args, model):
     torch.manual_seed(args.seed + rank)
-    for param in model.parameters():
-        # Break gradient sharing
-        param.grad.data = param.grad.data.clone()
 
     train_loader = torch.utils.data.DataLoader(
         datasets.MNIST('../data', train=True, download=True,
@@ -28,13 +25,12 @@ def train(rank, args, model):
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     for epoch in range(1, args.epochs + 1):
         train_epoch(epoch, args, model, train_loader, optimizer)
-        test_epoch(epoch, args, model, test_loader)
+        test_epoch(model, test_loader)
 
 
 def train_epoch(epoch, args, model, data_loader, optimizer):
     model.train()
     pid = os.getpid()
-    samples_seen = 0
     for batch_idx, (data, target) in enumerate(data_loader):
         data, target = Variable(data), Variable(target)
         optimizer.zero_grad()
@@ -48,19 +44,18 @@ def train_epoch(epoch, args, model, data_loader, optimizer):
                 100. * batch_idx / len(data_loader), loss.data[0]))
 
 
-def test_epoch(epoch, args, model, data_loader):
+def test_epoch(model, data_loader):
     model.eval()
     test_loss = 0
     correct = 0
     for data, target in data_loader:
         data, target = Variable(data, volatile=True), Variable(target)
         output = model(data)
-        test_loss += F.nll_loss(output, target).data[0]
+        test_loss += F.nll_loss(output, target, size_average=False).data[0] # sum up batch loss
         pred = output.data.max(1)[1] # get the index of the max log-probability
         correct += pred.eq(target.data).cpu().sum()
 
-    test_loss = test_loss
-    test_loss /= len(data_loader) # loss function already averages over batch size
+    test_loss /= len(data_loader.dataset)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
         test_loss, correct, len(data_loader.dataset),
         100. * correct / len(data_loader.dataset)))
